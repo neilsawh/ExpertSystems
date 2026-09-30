@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Job Qualification Expert System</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{--bg:#f6f7f9;--fg:#1a1d21;--card:#fff;--bd:#d8dce2;--ok:#1a7f37;--no:#b42318;--ac:#2456d6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#15171a;--fg:#e8eaed;--card:#1f2226;--bd:#363b42;--ok:#4ac26b;--no:#f97066;--ac:#7aa2ff}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;margin:12px 0}
+label{display:block;font-weight:600}.hint{font-size:.85rem;opacity:.75}
+input{width:100%;padding:8px;margin:6px 0 2px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--fg);font-size:1rem;box-sizing:border-box}
+.err{color:var(--no);font-size:.9rem;min-height:1.1em}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:1rem;cursor:pointer}
+.ok{border-left:5px solid var(--ok)}.no{border-left:5px solid var(--no)}
+.ok h3{color:var(--ok)}.no h3{color:var(--no)}h3{margin:0 0 6px}
+li{margin:2px 0}
+</style></head><body><main>
+<h1>Job Qualification Expert System</h1>
+<p>Answer each question exactly as described. Invalid entries will be rejected with instructions.</p>
+<div id="form"></div>
+<button id="go">Evaluate my qualifications</button>
+<div id="out"></div>
+</main>
+<script>
+// ---------- Question definitions (input validation) ----------
+const DEGREES=["None","Associates","Bachelors","Masters","Doctorate"];
+const Q=[
+ {id:"degree",type:"enum",vals:DEGREES,text:"Highest degree earned",hint:"Enter exactly one of: None, Associates, Bachelors, Masters, Doctorate (e.g. 'BS' is not accepted)."},
+ {id:"field",type:"enum",vals:["Computer Science","Other"],text:"Field of your highest degree",hint:"Enter exactly: Computer Science or Other (enter Other if degree is None)."},
+ {id:"pyCourse",type:"yn",text:"Have you completed Python course work?"},
+ {id:"seCourse",type:"yn",text:"Have you completed Software Engineering course work?"},
+ {id:"agileCourse",type:"yn",text:"Have you completed an Agile course?"},
+ {id:"pyYears",type:"num",text:"Years of Python development experience"},
+ {id:"dataYears",type:"num",text:"Years of data development experience"},
+ {id:"agileYears",type:"num",text:"Years of experience on Agile projects"},
+ {id:"git",type:"yn",text:"Have you used Git?"},
+ {id:"pmYears",type:"num",text:"Years managing software projects"},
+ {id:"pmi",type:"yn",text:"Do you hold the PMI Lean Project Management Certification?"},
+ {id:"esYears",type:"num",text:"Years developing Expert Systems"},
+ {id:"archYears",type:"num",text:"Years of data architecture and data development"}
+];
+function validate(q,raw){
+ const v=raw.trim();
+ if(!v) return{err:"This field is required."};
+ if(q.type==="yn"){const l=v.toLowerCase();if(l==="yes")return{val:true};if(l==="no")return{val:false};return{err:"Please enter exactly 'yes' or 'no'."}}
+ if(q.type==="num"){if(!/^\d+(\.\d+)?$/.test(v))return{err:"Enter a non-negative number of years (e.g. 3 or 2.5)."};const n=parseFloat(v);if(n>60)return{err:"Value must be 60 or less."};return{val:n}}
+ if(q.type==="enum"){const m=q.vals.find(x=>x.toLowerCase()===v.toLowerCase());return m?{val:m}:{err:"'"+v+"' is not valid. "+q.hint}}
+}
+// ---------- Knowledge base ----------
+// Derived-fact rules (forward chaining): if test(facts) then assert fact
+const DERIVE=[
+ {then:"bachelorCS",test:f=>DEGREES.indexOf(f.degree)>=2&&f.field==="Computer Science"},
+ {then:"mastersCS",test:f=>DEGREES.indexOf(f.degree)>=3&&f.field==="Computer Science"}
+];
+const yrs=(k,n,label)=>({txt:n+"+ years "+label,test:f=>f[k]>=n,got:f=>f[k]+" year(s)"});
+const yn=(k,label)=>({txt:label,test:f=>f[k],got:f=>"no"});
+const POS=[
+ {name:"Entry-Level Python Engineer",
+  need:[yn("pyCourse","Python course work"),yn("seCourse","Software Engineering course work")],
+  want:[yn("agileCourse","Agile course")],
+  qual:[{txt:"Bachelor in Computer Science",test:f=>f.bachelorCS,got:f=>f.degree+" in "+f.field}]},
+ {name:"Python Engineer",
+  need:[yrs("pyYears",3,"Python development"),yrs("dataYears",1,"data development"),{txt:"Experience in Agile projects",test:f=>f.agileYears>0,got:f=>"0 years"}],
+  want:[yn("git","Used Git")],
+  qual:[{txt:"Bachelor in Computer Science",test:f=>f.bachelorCS,got:f=>f.degree+" in "+f.field}]},
+ {name:"Project Manager",
+  need:[yrs("pmYears",3,"managing software projects"),yrs("agileYears",2,"in Agile projects")],
+  want:[],
+  qual:[yn("pmi","PMI Lean Project Management Certification")]},
+ {name:"Senior Knowledge Engineer",
+  need:[yrs("pyYears",4,"using Python to develop"),yrs("esYears",2,"developing Expert Systems"),yrs("archYears",2,"data architecture and data development")],
+  want:[],
+  qual:[{txt:"Master's in Computer Science",test:f=>f.mastersCS,got:f=>f.degree+" in "+f.field}]}
+];
+// ---------- Inference engine ----------
+function infer(f){
+ f=Object.assign({},f);
+ DERIVE.forEach(r=>{f[r.then]=r.test(f)}); // forward chaining
+ return POS.map(p=>{
+  const ev=(list,kind)=>list.map(c=>({kind,txt:c.txt,ok:!!c.test(f),got:c.got(f)}));
+  const need=ev(p.need,"Needed skill"),qual=ev(p.qual,"Qualification"),want=ev(p.want,"Desired skill");
+  const fails=need.concat(qual).filter(c=>!c.ok);
+  return{name:p.name,qualified:fails.length===0,need,qual,want,fails};
+ });
+}
+// ---------- UI ----------
+const form=document.getElementById("form");
+Q.forEach(q=>{
+ const d=document.createElement("div");d.className="card";
+ const ph=q.type==="yn"?"yes or no":q.type==="num"?"years, e.g. 3":q.vals.join(" / ");
+ d.innerHTML=`<label for="${q.id}">${q.text}</label><div class="hint">${q.hint||(q.type==="yn"?"Enter yes or no.":"Enter a number of years (0 if none).")}</div><input id="${q.id}" placeholder="${ph}" autocomplete="off"><div class="err" id="e_${q.id}"></div>`;
+ form.appendChild(d);
+});
+document.getElementById("go").onclick=()=>{
+ const facts={};let bad=0,first=null;
+ Q.forEach(q=>{
+  const r=validate(q,document.getElementById(q.id).value);
+  document.getElementById("e_"+q.id).textContent=r.err||"";
+  if(r.err){bad++;first=first||q.id}else facts[q.id]=r.val;
+ });
+ const out=document.getElementById("out");
+ if(bad){out.innerHTML=`<div class="card no"><h3>Please fix ${bad} invalid entr${bad>1?"ies":"y"}</h3>Correct the highlighted fields and try again.</div>`;document.getElementById(first).focus();return}
+ if(facts.degree==="None"&&facts.field!=="Other"){document.getElementById("e_field").textContent="If your degree is None, field must be 'Other'.";return}
+ const res=infer(facts);
+ const q=res.filter(r=>r.qualified),nq=res.filter(r=>!r.qualified);
+ const li=(c)=>`<li>${c.ok?"✅":"❌"} ${c.kind}: ${c.txt}${c.ok?"":" — you have: "+c.got}</li>`;
+ let h=`<h2>Positions you are qualified for</h2>`;
+ h+=q.length?q.map(r=>`<div class="card ok"><h3>${r.name}</h3><ul>${r.need.concat(r.qual).map(li).join("")}${r.want.map(c=>`<li>${c.ok?"⭐":"➖"} Desired skill: ${c.txt} (${c.ok?"you have this":"not required, but would help"})</li>`).join("")}</ul></div>`).join(""):`<div class="card">None at this time.</div>`;
+ h+=`<h2>Positions you are not qualified for</h2>`;
+ h+=nq.length?nq.map(r=>`<div class="card no"><h3>${r.name}</h3><b>Disqualified because:</b><ul>${r.fails.map(c=>`<li>${c.kind} not met: ${c.txt} — you have: ${c.got}</li>`).join("")}</ul><details><summary>Full evaluation</summary><ul>${r.need.concat(r.qual).map(li).join("")}</ul></details></div>`).join(""):`<div class="card">None — you qualify for every position!</div>`;
+ out.innerHTML=h;out.scrollIntoView({behavior:"smooth"});
+};
+</script></body></html>
